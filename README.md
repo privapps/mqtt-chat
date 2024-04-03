@@ -11,6 +11,9 @@ The backend is replaced with free public MQTT Server which supports websocket.
 
 On the client side, I did minimum changes which is similar as my [go group chat](https://github.com/privapps/gchat/). It uses plain javascript without any framework.
 
+### Note
+Due to MQTT's design catering to high-latency and unreliable networks, if your chat agent becomes disconnected, your mobile screen turns off for example, upon reconnection, the server seamlessly **replays** any missed messages. This feature proves invaluable, ensuring uninterrupted communication flow. By the way, you can try this with public mqtt emqx broker.
+
 ### Demo
 A live demo is at https://privapps.github.io/mqtt-chat/
 

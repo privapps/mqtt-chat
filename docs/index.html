@@ -92,6 +92,7 @@
                 <li>Each participant utilizes a shared secret key to generate encryption keys for message security, ensuring uniformity among all chat members.</li>
                 <li>The server side is using free public MTQQ broker, choose the one that works best for you.</li>
                 <li>Upon establishing a connection, your browser's URL will automatically update. You can readily distribute this modified URL to other participants for seamless integration.</li>
+                <li>Thanks to MQTT, all messages are delivered in real-time, encrypted. In addition, disconnected message may be <b>replayed</b></li>
             </ul>
             <p>To transmit a message, simply input your text and press "Enter."</p>
             <p>If you see `** unkown message **`, possiblely, someone is sending messages into same room with different secret key. In this case, they can not see you content and neither can you.</p>
@@ -168,6 +169,7 @@
             for (var i = 0; i < inputs.length; i++) {
                 inputs[i].disabled = flag;
             }
+            html_mtqq_host.disabled = flag
             html_message.disabled = !flag
             if (flag) {
                 html_connect_btn.style.display = 'none'
@@ -192,7 +194,7 @@
                 clientId: clientId,
                 protocolId: 'MQTT',
                 protocolVersion: 4,
-                clean: true,
+                clean: false,
                 reconnectPeriod: 1000,
                 connectTimeout: 30 * 1000
             }
@@ -211,14 +213,14 @@
             client.on('connect', () => {
                 console.log(`Client connected: ${clientId}`)
                 client.subscribe(channel, {
-                    qos: 0
+                    qos: 1
                 }, err => {
                     if (err) {
                         console.error(err)
                         return
                     }
                     console.log('subscribed to ' + channel)
-                    html_talks.innerHTML = ''
+                        // html_talks.innerHTML = '' 
 
                     switchControls(true)
                     setHash({
@@ -261,7 +263,7 @@
             console.log('publishing to ' + channel + ' ' + out_message)
 
             client.publish(channel, out_message, {
-                qos: 0,
+                qos: 1,
                 retain: false
             }, function(error) {
                 if (error) {
