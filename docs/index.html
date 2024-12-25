@@ -12,14 +12,48 @@
             font-size: 15px;
         }
         
-        #html_talks span {
+        #html_talks div {
             display: block;
-            background-color: #efefff;
             margin: 5px;
             padding: 5px;
-            border-radius: 10px;
             clear: both;
             width: 100%;
+        }
+        
+        #html_talks div.me {
+            display: grid !important;
+            justify-content: end;
+        }
+        
+        #html_talks div.other {
+            display: grid !important;
+            justify-content: start;
+        }
+        
+        #html_talks span.user {
+            font-weight: bold;
+            padding-left: 10px;
+            font-size: large;
+        }
+        
+        #html_talks span.meta {
+            display: block;
+            opacity: 0.7;
+        }
+        
+        #html_talks div.box>span {
+            white-space: pre-wrap;
+            padding-left: 10px;
+            padding-right: 10px;
+            border-radius: 10px;
+        }
+        
+        #html_talks div.me>span {
+            background-color: antiquewhite;
+        }
+        
+        #html_talks div.other>span {
+            background-color: skyblue;
         }
         
         #html_info {
@@ -30,10 +64,11 @@
             text-align: center;
         }
         
-        input[type="text"]:disabled {
+        input[type="text"]:disabled,
+        select:disabled {
             background-color: #e2e2e2;
             /* Light gray background color */
-            color: #555;
+            color: #999;
             /* Dark gray text color */
         }
         
@@ -41,42 +76,47 @@
             color: #aaa;
         }
     </style>
-    <script src="https://privapps.github.io/gchat/js/cypher.js"></script>
+    <script src="https://unpkg.com/openpgp@5.11.1/dist/openpgp.min.js"></script>
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 </head>
 
 <body>
     <div class="flex five" id="controls">
         <div>
-            <small><label for="html_your_id">Your ID</label></small><br/>
+            <small><label for="html_your_id">Your ID</label></small><br />
             <input type="text" placeholder="Your ID" id='html_your_id'>
         </div>
         <div>
-            <small><label for="html_room_id">Room ID</label></small><br/>
+            <small><label for="html_room_id">Room ID</label></small><br />
             <input type="text" placeholder="Room ID" id='html_room_id'>
         </div>
         <div>
-            <small><label for="html_secret">Secret Key</label></small><br/>
+            <small><label for="html_secret">Secret Key</label></small><br />
             <input type="text" placeholder="Secrets. Has to be same for all users in room" id='html_secret'>
         </div>
         <div>
-            <small><label for="html_mtqq_host">MQTT Host</label></small><br/>
+            <small><label for="html_mtqq_host">MQTT Host</label></small><br />
             <select id="html_mtqq_host">
-                <option value="wss://broker.emqx.io:8084/mqtt">emqx</option>
+                <option value="wss://0h0.alwaysdata.net/mochi-mqtt">mochi</option>
                 <option value="wss://broker.hivemq.com:8884/mqtt">hivemq</option>
+                <option value="wss://broker.emqx.io:8084/mqtt">emqx</option>
                 <option value="wss://test.mosquitto.org:8081/mqtt">mosquitto</option>
             </select>
         </div>
         <div>
-            <small><label>Start/Stop</label></small><br/>
+            <small><label>Start/Stop</label></small><br />
             <button onclick='connect(this)' id='html_connect_btn' data-tooltip="your name, room, secrets. Url will be update after connect" class="tooltip-left">Connect</button>
             <button onclick='disconnect(this)' id='html_disconnect_btn' style="display: none;" class="warning">Disconnect</button>
         </div>
     </div>
 
-    <div class="flex">
+    <div class="flex" id="html_chat" style="display: none;">
+        <div class="flex">
+            <button onclick='send()' style="font-size: 80%;" id='button_send' class="shyButton">Send
+                Message</button>
+        </div>
         <div>
-            <input type="text" placeholder="Message. Enter to send" id='html_message'>
+            <textarea rows="2" placeholder="Message. Control + Enter to send" id='html_message'></textarea>
         </div>
     </div>
     <div id="html_help" class="flex">
@@ -97,7 +137,8 @@
             <p>To transmit a message, simply input your text and press "Enter."</p>
             <p>If you see `** unkown message **`, possiblely, someone is sending messages into same room with different secret key. In this case, they can not see you content and neither can you.</p>
             <p>Messages are encrypted using a symmetric key before dissemination to other participants, ensuring privacy and security throughout the communication process.</p>
-            <p>From a technical standpoint, the client employs plain JavaScript for message encryption, while the server utilizes WebSocket, known for its reliability compared to WebRTC, to route and broadcast messages to the channel.</p>
+            <p>From a technical standpoint, the client employs plain JavaScript for message encryption, while the server utilizes WebSocket, known for its reliability compared to WebRTC, to route and broadcast messages to the channel.
+            </p>
             <p>Source code is at <a href="https://github.com/privapps/mqtt-chat">GitHub</a></p>
         </article>
     </div>
@@ -106,6 +147,19 @@
         <!--This will be added by JavaScript -->
     </div>
     <script>
+        async function sha256(message) {
+            // Encode the message as a Uint8Array
+            const encodedMessage = new TextEncoder().encode(message);
+
+            // Generate the hash
+            const hashBuffer = await crypto.subtle.digest('SHA-256', encodedMessage);
+
+            // Convert the buffer to a hex string
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            const hashHex = hashArray.map(byte => byte.toString(16).padStart(2, '0')).join('');
+
+            return hashHex;
+        }
         document.addEventListener("DOMContentLoaded", function() {
             var hash = window.location.hash.substring(1); // Get the hash value excluding the '#'
             var params = {}; // Object to store parameters
@@ -125,6 +179,7 @@
             // Now you can access the values for room and secret
             var room = params.room;
             var secret = params.secret;
+            var host = params.host;
             predefined = false
                 // Example usage:
             if (room !== undefined) {
@@ -137,14 +192,18 @@
                 predefined = true
             }
 
+            if (host !== undefined) {
+                html_mtqq_host.value = host
+                predefined = true
+            }
+
             if (!predefined) {
                 console.log()
-                sha256(new Date().toISOString()).then(salt => {
-                    html_room_id.value = salt.substring(5, 10)
-                    html_secret.value = salt.substring(10, 15)
+                sha256(new Date().getUTCMinutes().toString()).then(salt => {
+                    html_room_id.value = salt.substring(5, 8)
+                    html_secret.value = salt.substring(10, 12)
                 })
             }
-            html_message.disabled = true
         });
 
         function setHash(params) {
@@ -170,13 +229,14 @@
                 inputs[i].disabled = flag;
             }
             html_mtqq_host.disabled = flag
-            html_message.disabled = !flag
             if (flag) {
                 html_connect_btn.style.display = 'none'
                 html_disconnect_btn.style.display = 'inline-block'
+                html_chat.style.display = 'flex'
             } else {
                 html_connect_btn.style.display = 'inline-block'
                 html_disconnect_btn.style.display = 'none'
+                html_chat.style.display = 'none'
             }
         }
 
@@ -199,7 +259,7 @@
                 connectTimeout: 30 * 1000
             }
             channel = await sha256(html_room_id.value)
-            cypher_key = await generateKeyFromSeed(html_secret.value, channel)
+            cypher_key = html_secret.value //+ channel
             html_help.style.display = 'none'
             client = mqtt.connect(host, options)
             client.on('error', (err) => {
@@ -220,25 +280,34 @@
                         return
                     }
                     console.log('subscribed to ' + channel)
-                        // html_talks.innerHTML = '' 
-
                     switchControls(true)
                     setHash({
                         room: html_room_id.value,
-                        secret: html_secret.value
+                        secret: html_secret.value,
+                        host: html_mtqq_host.value
                     })
-                    send2Server(`** ${html_your_id.value} joined **`)
+                    let obj = createSendMessage(`** ${html_your_id.value} joined **`, true)
+                    send2Server(obj)
                 })
 
             })
             client.on('message', function(topic, payload, packet) {
-                // Payload is Buffer
-
-                decrypt2Str(payload.toString(), cypher_key).then(data => {
-                    addPreBlock(data)
+                openpgp.readMessage({
+                    binaryMessage: payload // parse encrypted bytes
+                }).then(encryptedMessage => {
+                    openpgp.decrypt({
+                        message: encryptedMessage,
+                        passwords: [cypher_key], // decrypt with password
+                        format: 'binary' // output as Uint8Array
+                    }).then(decryptedMessage => {
+                        decryptedStr = new TextDecoder().decode(decryptedMessage.data)
+                        addPreBlock(decryptedStr)
+                    }).catch(err => {
+                        console.log(err, payload)
+                        addPreBlock(createSendMessage('** unknow message **', true))
+                    })
                 }).catch(err => {
-                    console.log(err, payload.toString())
-                    addPreBlock('** unknow message **')
+                    console.log(err, payload)
                 })
             })
         }
@@ -254,13 +323,28 @@
             if (msg === '') {
                 return
             }
-            full_message = `${html_your_id.value}: ${msg}`
-            send2Server(full_message)
+            send2Server(createSendMessage(msg))
         }
 
-        async function send2Server(full_message) {
-            out_message = await encrypt2Str(full_message, cypher_key)
-            console.log('publishing to ' + channel + ' ' + out_message)
+        //{u: "user", t: "epoch", m: "message"}
+        function createSendMessage(msg, sys = false) {
+            let json = {
+                m: msg,
+                t: Math.floor(new Date().getTime() / 1000),
+                u: sys ? 'sys' : html_your_id.value
+            }
+            return JSON.stringify(json)
+        }
+
+        async function send2Server(json_str) {
+            const message = await openpgp.createMessage({
+                binary: new TextEncoder().encode(json_str)
+            });
+            const out_message = await openpgp.encrypt({
+                message: message, // input as Message object
+                passwords: [cypher_key], // multiple passwords possible
+                format: 'binary' // don't ASCII armor (for Uint8Array output)
+            });
 
             client.publish(channel, out_message, {
                 qos: 1,
@@ -274,48 +358,47 @@
         }
 
         function addPreBlock(content) {
-            var temp = document.createElement('div');
-            temp.textContent = content;
-
-            sanitizedContent = temp.innerHTML
-                // Create a <span> block
-            var block = document.createElement('span');
-            block.textContent = sanitizedContent;
-            // add some fancy css todo
-            const pattern = /^\*\* .* \*\*$/;
-            if (pattern.test(sanitizedContent)) {
+            const obj = JSON.parse(content);
+            ts = new Date(1000 * obj.t).toLocaleTimeString()
+            if (obj.u === 'sys') {
                 html_info.style.display = 'block';
-                html_info.textContent = sanitizedContent;
-                setTimeout(function() {
-                    html_info.style.display = 'none';
-                }, 5000); // 5000 milliseconds = 5 seconds
-            } else {
-                html_talks.insertBefore(block, html_talks.firstChild)
-                if (sanitizedContent.startsWith(`${html_your_id.value}: `)) {
-                    block.style.textAlign = 'right';
-                    block.style.backgroundColor = '#efe';
-                }
-                const colonIndex = sanitizedContent.indexOf(':');
-
-                // If ':' is found
-                if (colonIndex !== -1) {
-                    // Get the text before the ':' character
-                    const textBeforeColon = sanitizedContent.substring(0, colonIndex).trim();
-
-                    // Get the text after the ':' character
-                    const textAfterColon = sanitizedContent.substring(colonIndex + 1).trim();
-
-                    // Wrap the text before ':' in a <b> element
-                    block.innerHTML = '<b>' + textBeforeColon + '</b>: ' + textAfterColon;
-                }
-
+                html_info.textContent = ts + ': ' + obj.m;
+                return
             }
-            block.innerHTML += `<br><small style="font-size: 70%; color: #999">${new Date().toLocaleTimeString()}</small>`
+
+
+            let container = document.createElement('div');
+            if (obj.u === html_your_id.value) {
+                container.classList.add('me');
+            } else {
+                container.classList.add('other');
+            }
+            container.classList.add('box');
+            let box = document.createElement('span');
+            let meta = document.createElement('span');
+            meta.classList.add('meta');
+            let time = document.createElement('span');
+            time.textContent = ts;
+            let user = document.createElement('span');
+            user.classList.add('user');
+            user.textContent = obj.u;
+            meta.appendChild(time);
+            meta.appendChild(user);
+            box.appendChild(meta);
+
+            let message = document.createElement('span');
+            message.classList.add('message');
+            message.textContent = obj.m;
+            box.appendChild(message);
+            container.appendChild(box);
+
+            html_talks.insertBefore(container, html_talks.firstChild)
         }
 
         async function exit() {
             if (client != null) {
-                send2Server(`** ${html_your_id.value} left **`).then(() => {
+                let obj = createSendMessage(`** ${html_your_id.value} left **`, true)
+                send2Server(obj).then(() => {
                     client.unsubscribe(channel, {}, () => {
                         client.end()
                     })
@@ -329,7 +412,7 @@
             event.returnValue = '';
         });
         window.html_message.onkeyup = (ev) => {
-            if (ev.key === 'Enter') {
+            if (ev.key === 'Enter' && event.ctrlKey) {
                 send().then(() => html_message.value = '')
             }
         }
